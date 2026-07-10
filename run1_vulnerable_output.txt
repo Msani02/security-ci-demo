@@ -1,0 +1,143 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /usr/bin/python
+cachedir: .pytest_cache
+rootdir: /home/claude/security_ci_demo
+collecting ... collected 5 items
+
+security_test.py::test_login_rejects_sql_injection FAILED                [ 20%]
+security_test.py::test_admin_endpoint_requires_real_session FAILED       [ 40%]
+security_test.py::test_search_escapes_user_input FAILED                  [ 60%]
+security_test.py::test_account_enforces_ownership FAILED                 [ 80%]
+security_test.py::test_calc_handles_bad_input_gracefully FAILED          [100%]
+
+=================================== FAILURES ===================================
+_______________________ test_login_rejects_sql_injection _______________________
+
+client = <FlaskClient <Flask 'app'>>
+
+    def test_login_rejects_sql_injection(client):
+        """BUG 1: SQL Injection via unparameterized login query."""
+        payload = {"username": "' OR '1'='1' -- ", "password": "anything"}
+        resp = client.post("/login", data=payload)
+>       assert resp.status_code == 401, (
+            "SQL injection payload logged in successfully — "
+            "the login query is not parameterized"
+        )
+E       AssertionError: SQL injection payload logged in successfully — the login query is not parameterized
+E       assert 200 == 401
+E        +  where 200 = <WrapperTestResponse streamed [200 OK]>.status_code
+
+security_test.py:22: AssertionError
+__________________ test_admin_endpoint_requires_real_session ___________________
+
+client = <FlaskClient <Flask 'app'>>
+
+    def test_admin_endpoint_requires_real_session(client):
+        """BUG 2: Broken auth — trusting a client-supplied header."""
+        resp = client.get("/admin/stats", headers={"X-Role": "admin"})
+>       assert resp.status_code == 403, (
+            "Admin endpoint trusted a client-supplied X-Role header "
+            "instead of a verified server-side session"
+        )
+E       AssertionError: Admin endpoint trusted a client-supplied X-Role header instead of a verified server-side session
+E       assert 200 == 403
+E        +  where 200 = <WrapperTestResponse streamed [200 OK]>.status_code
+
+security_test.py:31: AssertionError
+________________________ test_search_escapes_user_input ________________________
+
+client = <FlaskClient <Flask 'app'>>
+
+    def test_search_escapes_user_input(client):
+        """BUG 3: Reflected XSS — raw input echoed into HTML."""
+        payload = "<script>alert(1)</script>"
+        resp = client.get("/search", query_string={"q": payload})
+>       assert b"<script>" not in resp.data, (
+            "Raw <script> tag reflected unescaped in the response — XSS vulnerability"
+        )
+E       AssertionError: Raw <script> tag reflected unescaped in the response — XSS vulnerability
+E       assert b'<script>' not in b'<html><body><h2>Results for: <script>alert(1)</script></h2><p>No results found.</p></body></html>'
+E        +  where b'<html><body><h2>Results for: <script>alert(1)</script></h2><p>No results found.</p></body></html>' = <WrapperTestResponse 97 bytes [200 OK]>.data
+
+security_test.py:41: AssertionError
+_______________________ test_account_enforces_ownership ________________________
+
+client = <FlaskClient <Flask 'app'>>
+
+    def test_account_enforces_ownership(client):
+        """BUG 4: Broken access control / IDOR."""
+        # Log in as a low-privilege user (guest, id=3)...
+        client.post("/login", data={"username": "guest", "password": "guestpass"})
+        # ...then try to read another user's account (admin, id=1) directly by ID.
+        resp = client.get("/account/1")
+>       assert resp.status_code == 403, (
+            "A logged-in guest could read another user's account data "
+            "by guessing the ID — broken access control / IDOR"
+        )
+E       AssertionError: A logged-in guest could read another user's account data by guessing the ID — broken access control / IDOR
+E       assert 200 == 403
+E        +  where 200 = <WrapperTestResponse streamed [200 OK]>.status_code
+
+security_test.py:52: AssertionError
+____________________ test_calc_handles_bad_input_gracefully ____________________
+
+client = <FlaskClient <Flask 'app'>>
+
+    def test_calc_handles_bad_input_gracefully(client):
+        """BUG 5: System crash on invalid input (e.g. divide by zero)."""
+>       resp = client.get("/calc", query_string={"a": "10", "b": "0"})
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+security_test.py:60: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/local/lib/python3.12/dist-packages/werkzeug/test.py:1162: in get
+    return self.open(*args, **kw)
+           ^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/flask/testing.py:235: in open
+    response = super().open(
+/usr/local/lib/python3.12/dist-packages/werkzeug/test.py:1116: in open
+    response_parts = self.run_wsgi_app(request.environ, buffered=buffered)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/werkzeug/test.py:988: in run_wsgi_app
+    rv = run_wsgi_app(self.application, environ, buffered=buffered)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/werkzeug/test.py:1264: in run_wsgi_app
+    app_rv = app(environ, start_response)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/flask/app.py:1536: in __call__
+    return self.wsgi_app(environ, start_response)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/flask/app.py:1514: in wsgi_app
+    response = self.handle_exception(e)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/flask/app.py:1511: in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/flask/app.py:919: in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/flask/app.py:917: in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/dist-packages/flask/app.py:902: in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    @app.route("/calc")
+    def calc():
+        # BUG 5 (System Crash): no input validation or exception handling.
+        a = float(request.args.get("a"))
+        b = float(request.args.get("b"))
+>       result = a / b  # ZeroDivisionError / ValueError crash the request
+                 ^^^^^
+E       ZeroDivisionError: float division by zero
+
+app.py:90: ZeroDivisionError
+=========================== short test summary info ============================
+FAILED security_test.py::test_login_rejects_sql_injection - AssertionError: S...
+FAILED security_test.py::test_admin_endpoint_requires_real_session - Assertio...
+FAILED security_test.py::test_search_escapes_user_input - AssertionError: Raw...
+FAILED security_test.py::test_account_enforces_ownership - AssertionError: A ...
+FAILED security_test.py::test_calc_handles_bad_input_gracefully - ZeroDivisio...
+============================== 5 failed in 0.36s ===============================

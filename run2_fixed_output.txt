@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /usr/bin/python
+cachedir: .pytest_cache
+rootdir: /home/claude/security_ci_demo
+collecting ... collected 5 items
+
+security_test.py::test_login_rejects_sql_injection PASSED                [ 20%]
+security_test.py::test_admin_endpoint_requires_real_session PASSED       [ 40%]
+security_test.py::test_search_escapes_user_input PASSED                  [ 60%]
+security_test.py::test_account_enforces_ownership PASSED                 [ 80%]
+security_test.py::test_calc_handles_bad_input_gracefully PASSED          [100%]
+
+============================== 5 passed in 0.11s ===============================
