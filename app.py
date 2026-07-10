@@ -1,19 +1,23 @@
 """
 Tiny 'Stedi-AI'-style demo, extended to security testing.
 
-This app is INTENTIONALLY vulnerable (v1). It contains five injected bugs:
+*** VULNERABLE BASELINE — v1 ***
+This version intentionally contains 5 bugs, used as a baseline so a
+security scanner (or your STEDi-AI audit tool) has real findings to
+detect before we push the fixed version on top and confirm they clear.
+
   1. SQL Injection      - /login builds a raw SQL string
   2. Broken Auth        - /admin/stats trusts a client-supplied header
   3. Reflected XSS       - /search reflects raw input into HTML
   4. Broken Access Ctrl - /account/<id> has no ownership check (IDOR)
   5. System Crash       - /calc has no input validation / exception handling
 
-security_test.py is written to catch all five. Run it against this file
-to see the failures, then compare with the fixed version.
+Also running in debug=True at the bottom, which is itself a 6th real
+finding (matches the "Insecure Configuration / debug mode enabled"
+result your scanner already flagged) — see NOTE at the bottom.
 """
 
 from flask import Flask, request, session, jsonify
-from markupsafe import escape
 import sqlite3
 
 app = Flask(__name__)
@@ -42,10 +46,10 @@ def login():
     username = request.form.get("username", "")
     password = request.form.get("password", "")
 
-    # FIX 1: parameterized query — user input is bound as data, never
-    # concatenated into the SQL string.
-    query = "SELECT * FROM users WHERE username = ? AND password = ?"
-    user = DB.execute(query, (username, password)).fetchone()
+    # BUG 1 (SQL Injection): building the query with string formatting
+    # instead of parameter binding.
+    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+    user = DB.execute(query).fetchone()
 
     if user:
         session["user_id"] = user["id"]
@@ -56,9 +60,9 @@ def login():
 
 @app.route("/admin/stats")
 def admin_stats():
-    # FIX 2: check the verified server-side session, not a client-supplied
-    # header (which anyone can set to whatever they want).
-    if session.get("role") == "admin":
+    # BUG 2 (Broken Auth): trusts a client-supplied header instead of the
+    # server-verified session role.
+    if request.headers.get("X-Role") == "admin":
         return jsonify({"ok": True, "secret": "total company balance revealed"})
     return jsonify({"ok": False}), 403
 
@@ -66,18 +70,15 @@ def admin_stats():
 @app.route("/search")
 def search():
     q = request.args.get("q", "")
-    # FIX 3: escape user input before embedding it in HTML.
-    safe_q = escape(q)
-    html = f"<html><body><h2>Results for: {safe_q}</h2><p>No results found.</p></body></html>"
+    # BUG 3 (Reflected XSS): raw string concatenation, no escaping.
+    html = f"<html><body><h2>Results for: {q}</h2><p>No results found.</p></body></html>"
     return html
 
 
 @app.route("/account/<int:user_id>")
 def account(user_id):
-    # FIX 4: only the account owner (or an admin) may view this account.
-    if session.get("user_id") != user_id and session.get("role") != "admin":
-        return jsonify({"ok": False}), 403
-
+    # BUG 4 (Broken Access Control / IDOR): no check that the logged-in
+    # user actually owns this account id.
     row = DB.execute(
         "SELECT id, username, balance FROM users WHERE id = ?", (user_id,)
     ).fetchone()
@@ -88,16 +89,15 @@ def account(user_id):
 
 @app.route("/calc")
 def calc():
-    # FIX 5: validate input and handle errors gracefully instead of
-    # letting an unhandled exception crash the request.
-    try:
-        a = float(request.args.get("a"))
-        b = float(request.args.get("b"))
-        result = a / b
-    except (TypeError, ValueError, ZeroDivisionError):
-        return jsonify({"ok": False, "error": "invalid input"}), 400
+    # BUG 5 (System Crash): no input validation or exception handling.
+    a = float(request.args.get("a"))
+    b = float(request.args.get("b"))
+    result = a / b  # ZeroDivisionError / ValueError crash the request
     return jsonify({"ok": True, "result": result})
 
 
 if __name__ == "__main__":
+    # NOTE: debug=True is ALSO an intentional finding here (matches your
+    # scanner's "Insecure Configuration / debug mode enabled" result).
+    # In production this leaks stack traces and internals to end users.
     app.run(debug=True)
